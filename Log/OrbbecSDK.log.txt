@@ -1,0 +1,4 @@
+[05/23 10:29:52.707627][info][8402965][MacUsbPal.cpp:213] Create PollingDeviceWatcher!
+[05/23 10:29:52.707639][info][8402965][DeviceManager.cpp:25] Current found device(s): (0)
+[05/23 10:29:52.707641][info][8402965][DeviceManager.cpp:405] Enable net device enumeration: true
+[05/23 10:29:53.713132][info][8402965][DeviceManager.cpp:25] Current device(s) list: (0)
