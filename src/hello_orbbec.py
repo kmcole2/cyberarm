@@ -1,5 +1,13 @@
 #!/usr/bin/env python3
+
 """Hello World for Orbbec depth camera."""
+
+import sys
+# Force Python to look inside the compiled build directory before looking anywhere else
+sys.path.insert(0, '/home/kmcole/projects/Hackathon/cyberarm/pyorbbecsdk/build')
+
+# Your original imports follow below...
+from pyorbbecsdk import Context
 
 import numpy as np
 from pyorbbecsdk import (
