@@ -23,6 +23,13 @@ while not piper.EnablePiper():
     time.sleep(0.01)
 print("Enabled!")
 
+# Initialize gripper: clear errors then enable
+piper.GripperCtrl(0, 1000, 0x02, 0)
+time.sleep(0.1)
+piper.GripperCtrl(0, 1000, 0x01, 0)
+time.sleep(0.1)
+print("Gripper initialized.")
+
 # Joint angles in millidegrees (0.001°)
 # J1: base rotation, J2: shoulder, J3: elbow
 # J4: forearm roll, J5: wrist pitch, J6: wrist yaw

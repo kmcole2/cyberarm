@@ -51,8 +51,12 @@ def init_arm(can_channel):
         time.sleep(0.01)
     print("Arm enabled.")
 
+    # Initialize gripper: clear errors then enable
+    piper.GripperCtrl(0, 1000, 0x02, 0)
+    time.sleep(0.1)
     piper.GripperCtrl(0, 1000, 0x01, 0)
-    print("Gripper closed.")
+    time.sleep(0.1)
+    print("Gripper initialized.")
     return piper
 
 
