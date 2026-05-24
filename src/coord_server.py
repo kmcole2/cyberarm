@@ -6,11 +6,17 @@ Uses our own IK solver (piper_ik.py) to convert Cartesian coordinates to
 joint angles, then sends them via JointCtrl. This bypasses the firmware's
 EndPoseCtrl which has silent failure modes.
 
-Protocol:
-  - Connect to TCP port 5555 (configurable)
+Ports:
+  - Coord port (default 5555): streams XYZ movement commands
+  - Status port (default 5556): request/response for arm state queries
+
+Protocol (coord port):
   - Send one JSON object per line: {"x": 250.0, "y": 0.0, "z": 300.0}
   - Coordinates are in millimeters
-  - Gripper stays closed, orientation is fixed (pointing forward)
+
+Protocol (status port):
+  - Send: getPiperStatus\n
+  - Receive: JSON with joints, end pose, arm status, gripper
 
 Usage:
   python3 coord_server.py                # Full mode (arm connected)
@@ -24,6 +30,7 @@ import math
 import os
 import socket
 import sys
+import threading
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -87,8 +94,113 @@ def send_joints(piper, joints_rad, speed):
     piper.GripperCtrl(0, 1000, 0x01, 0)
 
 
-def run_server(port, piper, speed, no_arm):
-    """Run the TCP server, accepting one client at a time."""
+def get_piper_status(piper):
+    """Read current arm state and return as a dict."""
+    joint_msg = piper.GetArmJointMsgs()
+    js = joint_msg.joint_state
+    joints_deg = [
+        js.joint_1 / 1000.0,
+        js.joint_2 / 1000.0,
+        js.joint_3 / 1000.0,
+        js.joint_4 / 1000.0,
+        js.joint_5 / 1000.0,
+        js.joint_6 / 1000.0,
+    ]
+
+    end_msg = piper.GetArmEndPoseMsgs()
+    ep = end_msg.end_pose
+    end_pose = {
+        "x": ep.X_axis / 1000.0,
+        "y": ep.Y_axis / 1000.0,
+        "z": ep.Z_axis / 1000.0,
+        "rx": ep.RX_axis / 1000.0,
+        "ry": ep.RY_axis / 1000.0,
+        "rz": ep.RZ_axis / 1000.0,
+    }
+
+    status_msg = piper.GetArmStatus()
+    arm_st = status_msg.arm_status
+    arm_status = {
+        "enabled": arm_st.arm_status == 2,
+        "motion_status": arm_st.motion_status,
+        "err_code": arm_st.err_status,
+    }
+
+    gripper_msg = piper.GetArmGripperMsgs()
+    gp = gripper_msg.gripper_state
+    gripper = {
+        "angle_mm": gp.grippers_angle / 1000.0,
+        "effort_nm": gp.grippers_effort / 1000.0,
+    }
+
+    return {
+        "joints_deg": joints_deg,
+        "end_pose_mm": end_pose,
+        "arm_status": arm_status,
+        "gripper": gripper,
+        "timestamp": time.time(),
+    }
+
+
+def get_mock_status():
+    """Return zeroed status for --no-arm mode."""
+    return {
+        "joints_deg": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+        "end_pose_mm": {"x": 0.0, "y": 0.0, "z": 0.0, "rx": 0.0, "ry": 0.0, "rz": 0.0},
+        "arm_status": {"enabled": False, "motion_status": 0, "err_code": 0},
+        "gripper": {"angle_mm": 0.0, "effort_nm": 0.0},
+        "timestamp": time.time(),
+    }
+
+
+def run_status_server(port, piper, no_arm):
+    """TCP server for status queries. Runs in a daemon thread."""
+    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    server.bind(("0.0.0.0", port))
+    server.listen(1)
+    print(f"Status server listening on port {port}")
+
+    while True:
+        try:
+            conn, addr = server.accept()
+        except OSError:
+            break
+
+        buffer = ""
+        try:
+            while True:
+                data = conn.recv(4096)
+                if not data:
+                    break
+
+                buffer += data.decode("utf-8")
+
+                while "\n" in buffer:
+                    line, buffer = buffer.split("\n", 1)
+                    cmd = line.strip()
+                    if not cmd:
+                        continue
+
+                    if cmd == "getPiperStatus":
+                        if no_arm:
+                            status = get_mock_status()
+                        else:
+                            status = get_piper_status(piper)
+                        response = json.dumps(status) + "\n"
+                    else:
+                        response = json.dumps({"error": "unknown command"}) + "\n"
+
+                    conn.sendall(response.encode("utf-8"))
+
+        except (ConnectionResetError, BrokenPipeError):
+            pass
+        finally:
+            conn.close()
+
+
+def run_coord_server(port, piper, speed, no_arm):
+    """Run the TCP server for coordinate commands, accepting one client at a time."""
     limiter = PositionLimiter(max_step_mm=5.0)
     ik = PiperIK()
 
@@ -96,7 +208,7 @@ def run_server(port, piper, speed, no_arm):
     server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     server.bind(("0.0.0.0", port))
     server.listen(1)
-    print(f"\nListening on port {port} (Ctrl+C to quit)...")
+    print(f"Coord server listening on port {port}")
     print("Using custom IK → JointCtrl (bypassing EndPoseCtrl)")
 
     try:
@@ -168,7 +280,8 @@ def run_server(port, piper, speed, no_arm):
 
 def main():
     parser = argparse.ArgumentParser(description="TCP Coordinate Server → Piper Arm (Custom IK)")
-    parser.add_argument("--port", type=int, default=5555, help="TCP port (default: 5555)")
+    parser.add_argument("--port", type=int, default=5555, help="Coord TCP port (default: 5555)")
+    parser.add_argument("--status-port", type=int, default=5556, help="Status TCP port (default: 5556)")
     parser.add_argument("--can", default="can0", help="CAN channel (default: can0)")
     parser.add_argument("--speed", type=int, default=50, help="Arm speed %% (default: 50)")
     parser.add_argument("--no-arm", action="store_true", help="Debug mode (no robot)")
@@ -178,8 +291,15 @@ def main():
     if not args.no_arm:
         piper = init_arm(args.can)
 
+    status_thread = threading.Thread(
+        target=run_status_server,
+        args=(args.status_port, piper, args.no_arm),
+        daemon=True,
+    )
+    status_thread.start()
+
     try:
-        run_server(args.port, piper, args.speed, args.no_arm)
+        run_coord_server(args.port, piper, args.speed, args.no_arm)
     finally:
         if piper:
             print("Returning to home...")

@@ -14,6 +14,7 @@ import argparse
 import json
 import math
 import socket
+import threading
 import time
 import sys
 
@@ -105,16 +106,52 @@ def run_manual(sock):
     return_to_home(sock)
 
 
+def status_poller(host, status_port):
+    """Background thread: queries getPiperStatus every second and prints it."""
+    while True:
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(2.0)
+            sock.connect((host, status_port))
+            while True:
+                sock.sendall(b"getPiperStatus\n")
+                data = sock.recv(4096).decode("utf-8").strip()
+                if data:
+                    status = json.loads(data)
+                    joints = status["joints_deg"]
+                    ep = status["end_pose_mm"]
+                    arm = status["arm_status"]
+                    print(
+                        f"\n  [STATUS] joints=[{joints[0]:.1f},{joints[1]:.1f},{joints[2]:.1f},"
+                        f"{joints[3]:.1f},{joints[4]:.1f},{joints[5]:.1f}] "
+                        f"pos=({ep['x']:.1f},{ep['y']:.1f},{ep['z']:.1f}) "
+                        f"enabled={arm['enabled']} err={arm['err_code']}"
+                    )
+                time.sleep(1.0)
+        except (ConnectionRefusedError, OSError):
+            time.sleep(1.0)
+        finally:
+            try:
+                sock.close()
+            except Exception:
+                pass
+
+
 def main():
     parser = argparse.ArgumentParser(description="Test client for coord_server")
     parser.add_argument("--host", default="127.0.0.1", help="Server host (default: 127.0.0.1)")
     parser.add_argument("--port", type=int, default=5555, help="Server port (default: 5555)")
+    parser.add_argument("--status-port", type=int, default=5556, help="Status port (default: 5556)")
     parser.add_argument("--hz", type=int, default=30, help="Send rate in Hz (default: 30)")
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--circle", action="store_true", help="Circular motion pattern")
     mode.add_argument("--line", action="store_true", help="Linear back-and-forth pattern")
     mode.add_argument("--manual", action="store_true", help="Type coordinates manually")
     args = parser.parse_args()
+
+    # Start status polling in background
+    poller = threading.Thread(target=status_poller, args=(args.host, args.status_port), daemon=True)
+    poller.start()
 
     print(f"Connecting to {args.host}:{args.port}...")
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
