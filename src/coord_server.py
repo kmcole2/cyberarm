@@ -256,6 +256,8 @@ def run_coord_server(port, piper, speed, no_arm):
                         gripper_mm = float(msg.get("gripper", 0.0))
                         has_rotation = "rx" in msg or "ry" in msg or "rz" in msg
 
+                        print(f"  recv: x={x:.1f} y={y:.1f} z={z:.1f} rx={rx:.1f} ry={ry:.1f} rz={rz:.1f} gripper={gripper_mm:.1f}mm")
+
                         x, y, z = limiter.limit(x, y, z)
 
                         x = clamp(x, WORKSPACE_MIN[0], WORKSPACE_MAX[0])

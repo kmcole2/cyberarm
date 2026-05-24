@@ -37,6 +37,9 @@ time.sleep(0.5)
 
 ik = PiperIK()
 
+reached = []
+skipped = []
+
 
 def fk_pos(joints_deg):
     joints_rad = [math.radians(j) for j in joints_deg]
@@ -81,6 +84,7 @@ def move_and_report(j1_deg, j2_deg, j3_deg, label=""):
     if not safe:
         print("  J1={:4.0f} J2={:4.0f} J3={:4.0f} -> SKIP ({}) FK=({:.0f},{:.0f},{:.0f}) {}".format(
             j1_deg, j2_deg, j3_deg, reason, x, y, z, label))
+        skipped.append({"joints": (j1_deg, j2_deg, j3_deg), "fk": (x, y, z), "reason": reason})
         return False
 
     print("  J1={:4.0f} J2={:4.0f} J3={:4.0f} -> FK({:.0f},{:.0f},{:.0f}) ".format(
@@ -92,6 +96,7 @@ def move_and_report(j1_deg, j2_deg, j3_deg, label=""):
     ep = piper.GetArmEndPoseMsgs().end_pose
     ax, ay, az = ep.X_axis / 1000.0, ep.Y_axis / 1000.0, ep.Z_axis / 1000.0
     print("actual=({:.0f},{:.0f},{:.0f}) {}".format(ax, ay, az, label))
+    reached.append({"joints": (j1_deg, j2_deg, j3_deg), "fk": (x, y, z), "actual": (ax, ay, az)})
     time.sleep(0.5)
     return True
 
@@ -144,6 +149,48 @@ try:
     go_safe()
 
     print("\n=== Exploration complete! ===")
+
+    if reached:
+        xs = [r["actual"][0] for r in reached]
+        ys = [r["actual"][1] for r in reached]
+        zs = [r["actual"][2] for r in reached]
+
+        print("\n" + "=" * 50)
+        print("  WORKSPACE SUMMARY (actual arm positions)")
+        print("=" * 50)
+        print("  X range: {:.0f} to {:.0f} mm".format(min(xs), max(xs)))
+        print("  Y range: {:.0f} to {:.0f} mm".format(min(ys), max(ys)))
+        print("  Z range: {:.0f} to {:.0f} mm".format(min(zs), max(zs)))
+        print("")
+        print("  Positions reached: {}".format(len(reached)))
+        print("  Positions skipped: {} (safety limits)".format(len(skipped)))
+
+        max_x_pos = max(reached, key=lambda r: r["actual"][0])
+        min_x_pos = min(reached, key=lambda r: r["actual"][0])
+        max_y_pos = max(reached, key=lambda r: r["actual"][1])
+        max_z_pos = max(reached, key=lambda r: r["actual"][2])
+
+        print("")
+        print("  Max +X: ({:.0f},{:.0f},{:.0f}) at J1={:.0f} J2={:.0f} J3={:.0f}".format(
+            *max_x_pos["actual"], *max_x_pos["joints"]))
+        print("  Max -X: ({:.0f},{:.0f},{:.0f}) at J1={:.0f} J2={:.0f} J3={:.0f}".format(
+            *min_x_pos["actual"], *min_x_pos["joints"]))
+        print("  Max +Y: ({:.0f},{:.0f},{:.0f}) at J1={:.0f} J2={:.0f} J3={:.0f}".format(
+            *max_y_pos["actual"], *max_y_pos["joints"]))
+        print("  Max +Z: ({:.0f},{:.0f},{:.0f}) at J1={:.0f} J2={:.0f} J3={:.0f}".format(
+            *max_z_pos["actual"], *max_z_pos["joints"]))
+
+        horiz = [math.sqrt(r["actual"][0]**2 + r["actual"][1]**2) for r in reached]
+        max_h_idx = horiz.index(max(horiz))
+        max_h = reached[max_h_idx]
+        print("  Max horizontal reach: {:.0f}mm at ({:.0f},{:.0f},{:.0f})".format(
+            max(horiz), *max_h["actual"]))
+
+        print("")
+        print("  Recommended coord_server WORKSPACE limits:")
+        print("    WORKSPACE_MIN = [{:.0f}, 0, {:.0f}]".format(min(xs), max(80, min(zs))))
+        print("    WORKSPACE_MAX = [{:.0f}, {:.0f}, {:.0f}]".format(max(xs), max(ys), max(zs)))
+        print("=" * 50)
 
 except KeyboardInterrupt:
     print("\n\nInterrupted!")
