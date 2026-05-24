@@ -82,18 +82,24 @@ def set_gripper(opening_mm, duration=3.0):
         time.sleep(0.01)
     print()
 
-print("Opening to 50mm...")
-set_gripper(50.0)
+try:
+    print("Opening to 50mm...")
+    set_gripper(50.0)
 
-print("Closing to 0mm...")
-set_gripper(0.0)
+    print("Closing to 0mm...")
+    set_gripper(0.0)
 
-print("Opening to 70mm...")
-set_gripper(70.0)
+    print("Opening to 70mm...")
+    set_gripper(70.0)
 
-print("Closing to 0mm...")
-set_gripper(0.0)
+    print("Closing to 0mm...")
+    set_gripper(0.0)
 
-print("\nDisabling arm...")
-piper.DisablePiper()
-print("Done.")
+except KeyboardInterrupt:
+    print("\n\nInterrupted!")
+finally:
+    print("\nReturning gripper to 0mm...")
+    set_gripper(0.0, duration=2.0)
+    print("Disabling arm...")
+    piper.DisablePiper()
+    print("Done.")

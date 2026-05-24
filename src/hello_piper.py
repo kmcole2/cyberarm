@@ -57,38 +57,41 @@ def send(j1, j2, j3, j4, j5, j6, gripper_mm=0.0, duration=1.5):
     print()
 
 
-print("\n--- Phase 1: Raise arm, open gripper to max (100mm) ---")
-send(0, 40_000, -60_000, 0, 0, 0, gripper_mm=100.0)
+try:
+    print("\n--- Phase 1: Raise arm, open gripper to max (100mm) ---")
+    send(0, 40_000, -60_000, 0, 0, 0, gripper_mm=100.0)
 
-print("--- Phase 2: Gripper full range sweep while arm is up ---")
-send(0, 40_000, -60_000, 0, 0, 0, gripper_mm=0.0)
-send(0, 40_000, -60_000, 0, 0, 0, gripper_mm=50.0)
-send(0, 40_000, -60_000, 0, 0, 0, gripper_mm=100.0)
-send(0, 40_000, -60_000, 0, 0, 0, gripper_mm=0.0)
+    print("--- Phase 2: Gripper full range sweep while arm is up ---")
+    send(0, 40_000, -60_000, 0, 0, 0, gripper_mm=0.0)
+    send(0, 40_000, -60_000, 0, 0, 0, gripper_mm=50.0)
+    send(0, 40_000, -60_000, 0, 0, 0, gripper_mm=100.0)
+    send(0, 40_000, -60_000, 0, 0, 0, gripper_mm=0.0)
 
-print("--- Phase 3: Rotate J6 (±120°) with gripper open ---")
-send(0, 40_000, -60_000, 0, 0, 120_000, gripper_mm=70.0)
-send(0, 40_000, -60_000, 0, 0, -120_000, gripper_mm=70.0)
-send(0, 40_000, -60_000, 0, 0, 0, gripper_mm=70.0)
+    print("--- Phase 3: Rotate J6 (±120°) with gripper open ---")
+    send(0, 40_000, -60_000, 0, 0, 120_000, gripper_mm=70.0)
+    send(0, 40_000, -60_000, 0, 0, -120_000, gripper_mm=70.0)
+    send(0, 40_000, -60_000, 0, 0, 0, gripper_mm=70.0)
 
-print("--- Phase 4: Rotate J4 forearm roll (±100°) ---")
-send(0, 40_000, -60_000, 100_000, 0, 0, gripper_mm=50.0)
-send(0, 40_000, -60_000, -100_000, 0, 0, gripper_mm=50.0)
-send(0, 40_000, -60_000, 0, 0, 0, gripper_mm=50.0)
+    print("--- Phase 4: Rotate J4 forearm roll (±100°) ---")
+    send(0, 40_000, -60_000, 100_000, 0, 0, gripper_mm=50.0)
+    send(0, 40_000, -60_000, -100_000, 0, 0, gripper_mm=50.0)
+    send(0, 40_000, -60_000, 0, 0, 0, gripper_mm=50.0)
 
-print("--- Phase 5: Wrist pitch J5 (±70°) + gripper cycle ---")
-send(0, 40_000, -60_000, 0, 70_000, 0, gripper_mm=100.0)
-send(0, 40_000, -60_000, 0, -70_000, 0, gripper_mm=0.0)
-send(0, 40_000, -60_000, 0, 0, 0, gripper_mm=0.0)
+    print("--- Phase 5: Wrist pitch J5 (±70°) + gripper cycle ---")
+    send(0, 40_000, -60_000, 0, 70_000, 0, gripper_mm=100.0)
+    send(0, 40_000, -60_000, 0, -70_000, 0, gripper_mm=0.0)
+    send(0, 40_000, -60_000, 0, 0, 0, gripper_mm=0.0)
 
-print("--- Phase 6: Combined motion — sweep base + rotate + gripper cycle ---")
-for cycle in range(2):
-    send(60_000, 50_000, -80_000, 50_000, 30_000, 60_000, gripper_mm=100.0, duration=2.0)
-    send(-60_000, 30_000, -50_000, -50_000, -30_000, -60_000, gripper_mm=0.0, duration=2.0)
+    print("--- Phase 6: Combined motion — sweep base + rotate + gripper cycle ---")
+    for cycle in range(2):
+        send(60_000, 50_000, -80_000, 50_000, 30_000, 60_000, gripper_mm=100.0, duration=2.0)
+        send(-60_000, 30_000, -50_000, -50_000, -30_000, -60_000, gripper_mm=0.0, duration=2.0)
 
-print("\n--- Returning to zero ---")
-send(0, 0, 0, 0, 0, 0, gripper_mm=0.0, duration=2.0)
-
-print("Disabling arm...")
-piper.DisablePiper()
-print("Done.")
+except KeyboardInterrupt:
+    print("\n\nInterrupted!")
+finally:
+    print("\n--- Returning to zero ---")
+    send(0, 0, 0, 0, 0, 0, gripper_mm=0.0, duration=2.0)
+    print("Disabling arm...")
+    piper.DisablePiper()
+    print("Done.")

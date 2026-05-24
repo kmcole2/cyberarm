@@ -285,7 +285,11 @@ def run_coord_server(port, piper, speed, no_arm):
 
             print(f"\nClient {addr} disconnected (IK failures: {ik_failures}). Returning home...")
             if not no_arm:
-                send_joints(piper, [0.0, 0.0, 0.0, 0.0, 0.0, 0.0], speed, gripper_mm=0.0)
+                for _ in range(300):
+                    piper.MotionCtrl_2(0x01, 0x01, speed, 0x00)
+                    piper.JointCtrl(0, 0, 0, 0, 0, 0)
+                    piper.GripperCtrl(0, 1000, 0x01, 0)
+                    time.sleep(0.005)
             limiter.prev = None
             conn.close()
 
@@ -323,6 +327,7 @@ def main():
             for _ in range(300):
                 piper.MotionCtrl_2(0x01, 0x01, args.speed, 0x00)
                 piper.JointCtrl(0, 0, 0, 0, 0, 0)
+                piper.GripperCtrl(0, 1000, 0x01, 0)
                 time.sleep(0.005)
             print("Disabling arm...")
             piper.DisablePiper()
