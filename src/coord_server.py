@@ -88,8 +88,8 @@ def send_position(piper, x_mm, y_mm, z_mm, speed):
     z_u = int(z_mm * 1000)
 
     # Fixed orientation (gripper pointing down): RX=0, RY=0, RZ=0
-    piper.MotionCtrl_2(0x01, 0x01, speed, 0x00)
-    piper.EndPoseCtrl(x_u, y_u, z_u, 0, 0, 0)
+    piper.MotionCtrl_2(0x01, 0x00, speed, 0x00)
+    piper.EndPoseCtrl(x_u, y_u, z_u, 0, 85_000, 0)
     piper.GripperCtrl(0, 1000, 0x01, 0)
 
 
