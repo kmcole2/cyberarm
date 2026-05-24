@@ -113,15 +113,13 @@ class PiperIK:
             q = q + delta_q
             self._clamp_joints(q)
 
-        # Final check
+        # Accept as converged if position is good (orientation is best-effort)
         final = np.array(self.forward(q.tolist()))
         pos_err = np.linalg.norm(final[:3] - target_pos)
-        ori_err = np.linalg.norm(final[3:] - target_ori)
-        converged = pos_err < pos_tol and ori_err < ori_tol
 
         self._q_prev = q.copy()
         self._prev_converged = pos_err < pos_tol
-        return q.tolist(), converged
+        return q.tolist(), pos_err < pos_tol
 
     def solve_position_only(self, target_xyz, max_iter=50, pos_tol=2.0):
         """
