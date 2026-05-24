@@ -40,14 +40,20 @@ def main():
 
     ik = PiperIK()
 
-    has_rotation = args.rx is not None or args.ry is not None or args.rz is not None
-    if has_rotation:
-        rx = args.rx if args.rx is not None else 0.0
-        ry = args.ry if args.ry is not None else 85.0
-        rz = args.rz if args.rz is not None else 0.0
-        joints, converged = ik.solve([args.x, args.y, args.z], [rx, ry, rz])
-    else:
-        joints, converged = ik.solve_position_only([args.x, args.y, args.z])
+    joints, converged = ik.solve_position_only([args.x, args.y, args.z])
+
+    if not converged:
+        print("ERROR: IK did not converge for ({:.0f}, {:.0f}, {:.0f}). Position may be out of reach.".format(
+            args.x, args.y, args.z))
+        sys.exit(1)
+
+    joints = list(joints)
+    rx = args.rx if args.rx is not None else 0.0
+    ry = args.ry if args.ry is not None else 0.0
+    rz = args.rz if args.rz is not None else 0.0
+    joints[3] = math.radians(rx)
+    joints[4] = math.radians(ry)
+    joints[5] = math.radians(rz)
 
     if not converged:
         print("ERROR: IK did not converge for ({:.0f}, {:.0f}, {:.0f}). Position may be out of reach.".format(
