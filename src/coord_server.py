@@ -34,11 +34,13 @@ import threading
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from can_setup import ensure_can
 from piper_ik import PiperIK
 
 
 def init_arm(can_channel):
     """Initialize Piper arm on CAN bus."""
+    ensure_can(can_channel)
     from piper_sdk import C_PiperInterface_V2
 
     piper = C_PiperInterface_V2(can_channel)

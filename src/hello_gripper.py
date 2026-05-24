@@ -7,7 +7,10 @@ Requires CAN interface to be active:
   sudo ip link set can0 up type can bitrate 1000000
 """
 import time
+from can_setup import ensure_can
 from piper_sdk import C_PiperInterface_V2
+
+ensure_can()
 
 piper = C_PiperInterface_V2("can0")
 piper.ConnectPort()
