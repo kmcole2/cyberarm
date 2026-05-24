@@ -42,7 +42,9 @@ SRC/
 │   ├── pyorbbecsdk/             # Orbbec camera SDK (compiled C++ wrapper)
 │   └── piper_sdk/               # Piper robotic arm SDK
 └── src/
-    ├── arm_mirror.py            # Main application — camera + pose + arm control
+    ├── coord_server.py          # TCP server — receives XYZ, moves arm via IK
+    ├── coord_client.py          # Test client — sends sample trajectories
+    ├── arm_mirror.py            # Camera + MediaPipe pose → arm control
     ├── angle_utils.py           # Math: landmark→angle conversion, smoothing, safety
     ├── hello_orbbec.py          # Camera test & live viewer
     ├── hello_piper.py           # Arm control test script
@@ -52,6 +54,39 @@ SRC/
 ```
 
 ## File Documentation
+
+### `src/coord_server.py` — TCP Coordinate Server
+
+Receives XYZ end-effector positions from a simulator via TCP and moves the Piper arm using built-in inverse kinematics (`EndPoseCtrl`).
+
+**How it works:**
+1. Listens on a TCP port for a client connection
+2. Client streams newline-delimited JSON: `{"x": 250.0, "y": 0.0, "z": 300.0}\n`
+3. Coordinates are in millimeters — server converts to SDK units (0.001mm)
+4. Applies velocity limiting (max 5mm/step) to prevent violent movements
+5. Calls `EndPoseCtrl(X, Y, Z, 0, 0, 0)` — firmware solves IK internally
+6. Gripper stays closed at all times
+
+**CLI Options:**
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--port` | `5555` | TCP port to listen on |
+| `--can` | `can0` | CAN bus channel |
+| `--speed` | `50` | Arm speed % (lower = safer) |
+| `--no-arm` | off | Debug mode — prints positions without moving robot |
+
+### `src/coord_client.py` — Test Client
+
+Connects to the coordinate server and sends sample trajectories for testing without a real simulator.
+
+**Modes:**
+| Flag | Description |
+|------|-------------|
+| `--circle` | Traces a circle in the XZ plane (radius 50mm, 4s period) |
+| `--line` | Moves back and forth along X axis (150-350mm) |
+| `--manual` | Type `x y z` coordinates interactively |
+
+**Options:** `--host` (127.0.0.1), `--port` (5555), `--hz` (30)
 
 ### `src/arm_mirror.py` — Main Application
 
