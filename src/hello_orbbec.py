@@ -36,10 +36,10 @@ if device_list.get_count() == 0:
 device = device_list.get_device_by_index(0)
 info = device.get_device_info()
 print("=== Orbbec Device ===")
-print(f"  Name:       {info.get_name()}")
-print(f"  Serial:     {info.get_serial_number()}")
-print(f"  Firmware:   {info.get_firmware_version()}")
-print(f"  Connection: {info.get_connection_type()}")
+print("  Name:       {}".format(info.get_name()))
+print("  Serial:     {}".format(info.get_serial_number()))
+print("  Firmware:   {}".format(info.get_firmware_version()))
+print("  Connection: {}".format(info.get_connection_type()))
 
 # --- Show available stream profiles ---
 pipeline = Pipeline(device)
@@ -53,13 +53,13 @@ for sensor_type, label in [
     try:
         profiles = pipeline.get_stream_profile_list(sensor_type)
         p = profiles.get_default_video_stream_profile()
-        print(f"  {label}: {p.get_width()}x{p.get_height()} @ {p.get_fps()} fps")
+        print("  {}: {}x{} @ {} fps".format(label, p.get_width(), p.get_height(), p.get_fps()))
         if sensor_type == OBSensorType.COLOR_SENSOR:
             has_color = True
         else:
             has_depth = True
     except OBError:
-        print(f"  {label}: not available on this device")
+        print("  {}: not available on this device".format(label))
 
 # --- Configure streams ---
 config = Config()
@@ -106,7 +106,7 @@ try:
                 center_mm = depth_mm[h // 2, w // 2]
                 cv2.putText(
                     depth_colormap,
-                    f"Center: {center_mm:.0f} mm",
+                    "Center: {:.0f} mm".format(center_mm),
                     (10, 30),
                     cv2.FONT_HERSHEY_SIMPLEX,
                     0.7,
