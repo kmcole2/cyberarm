@@ -86,12 +86,13 @@ WORKSPACE_MIN = [-400, -400, 0]
 WORKSPACE_MAX = [400, 400, 500]
 
 
-def send_joints(piper, joints_rad, speed):
-    """Send joint angles to the Piper arm via JointCtrl."""
+def send_joints(piper, joints_rad, speed, gripper_mm=0.0):
+    """Send joint angles and gripper command to the Piper arm."""
     millideg = [int(math.degrees(j) * 1000) for j in joints_rad]
     piper.MotionCtrl_2(0x01, 0x01, speed, 0x00)
     piper.JointCtrl(*millideg)
-    piper.GripperCtrl(0, 1000, 0x01, 0)
+    gripper_units = int(gripper_mm * 1000)  # mm → 0.001mm
+    piper.GripperCtrl(gripper_units, 1000, 0x01, 0)
 
 
 def get_piper_status(piper):
@@ -242,13 +243,23 @@ def run_coord_server(port, piper, speed, no_arm):
                             print(f"  Bad message: {line!r} ({e})")
                             continue
 
+                        # Optional rotation (degrees) and gripper (mm)
+                        rx = float(msg.get("rx", 0.0))
+                        ry = float(msg.get("ry", 85.0))
+                        rz = float(msg.get("rz", 0.0))
+                        gripper_mm = float(msg.get("gripper", 0.0))
+                        has_rotation = "rx" in msg or "ry" in msg or "rz" in msg
+
                         x, y, z = limiter.limit(x, y, z)
 
                         x = clamp(x, WORKSPACE_MIN[0], WORKSPACE_MAX[0])
                         y = clamp(y, WORKSPACE_MIN[1], WORKSPACE_MAX[1])
                         z = clamp(z, WORKSPACE_MIN[2], WORKSPACE_MAX[2])
 
-                        joints, converged = ik.solve_position_only([x, y, z])
+                        if has_rotation:
+                            joints, converged = ik.solve([x, y, z], [rx, ry, rz])
+                        else:
+                            joints, converged = ik.solve_position_only([x, y, z])
 
                         if not converged:
                             ik_failures += 1
@@ -258,17 +269,17 @@ def run_coord_server(port, piper, speed, no_arm):
 
                         if no_arm:
                             degs = [f"{math.degrees(j):.0f}" for j in joints]
-                            print(f"  xyz=({x:.1f},{y:.1f},{z:.1f}) → joints={degs}", end="\r")
+                            print(f"  xyz=({x:.1f},{y:.1f},{z:.1f}) grip={gripper_mm:.1f} → joints={degs}", end="\r")
                         else:
-                            send_joints(piper, joints, speed)
-                            print(f"  xyz=({x:.1f},{y:.1f},{z:.1f}) → sent", end="\r")
+                            send_joints(piper, joints, speed, gripper_mm)
+                            print(f"  xyz=({x:.1f},{y:.1f},{z:.1f}) grip={gripper_mm:.1f} → sent", end="\r")
 
             except ConnectionResetError:
                 pass
 
             print(f"\nClient {addr} disconnected (IK failures: {ik_failures}). Returning home...")
             if not no_arm:
-                send_joints(piper, [0.0, 0.0, 0.0, 0.0, 0.0, 0.0], speed)
+                send_joints(piper, [0.0, 0.0, 0.0, 0.0, 0.0, 0.0], speed, gripper_mm=0.0)
             limiter.prev = None
             conn.close()
 

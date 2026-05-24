@@ -3,8 +3,8 @@
 Numerical Inverse Kinematics for the Piper arm.
 
 Uses the SDK's forward kinematics as a black box and solves via
-damped least squares on the position Jacobian (3×6). Converges in
-2-5 iterations for typical trajectories.
+damped least squares. Supports both position-only (3-DOF) and
+full pose (6-DOF position + orientation) solving.
 """
 
 import math
@@ -37,21 +37,98 @@ class PiperIK:
         result = self.fk.CalFK(joints_rad)
         return result[-1]
 
-    def solve(self, target_xyz, max_iter=50, pos_tol=2.0):
+    def solve(self, target_xyz, target_rpy=None, max_iter=80, pos_tol=2.0, ori_tol=5.0):
         """
-        Solve IK for a target XYZ position.
+        Solve full 6-DOF IK for position + orientation.
 
-        Only minimizes position error (3 constraints, 6 joints).
-        The redundancy naturally resolves toward the initial guess
-        configuration, keeping wrist joints near zero.
+        Uses a two-phase approach:
+        1. Solve position-only first (robust, underdetermined)
+        2. Adjust orientation via null-space of position Jacobian
+           (only moves joints in ways that don't disturb position)
 
         Args:
             target_xyz: [x, y, z] in mm
-            max_iter: iteration cap
+            target_rpy: [rx, ry, rz] in degrees (default: [0, 85, 0])
+            max_iter: iteration cap (split between phases)
             pos_tol: position convergence threshold in mm
+            ori_tol: orientation convergence threshold in degrees
 
         Returns:
             (joints_rad, converged): list of 6 joint angles in radians, success bool
+        """
+        if target_rpy is None:
+            target_rpy = [0.0, 85.0, 0.0]
+
+        # Phase 1: solve position using robust 3×6 method
+        target_pos = np.array(target_xyz, dtype=float)
+        target_ori = np.array(target_rpy, dtype=float)
+        q = self._get_initial_guess(target_xyz)
+
+        for _ in range(max_iter // 2):
+            cur = np.array(self.forward(q.tolist()))
+            pos_error = target_pos - cur[:3]
+            if np.linalg.norm(pos_error) < pos_tol:
+                break
+            Jp = self._position_jacobian(q)
+            delta_q = Jp.T @ np.linalg.solve(Jp @ Jp.T + 0.01**2 * np.eye(3), pos_error)
+            q = q + delta_q
+            self._clamp_joints(q)
+
+        # Phase 2: adjust orientation in the null space of position
+        for _ in range(max_iter // 2):
+            cur = np.array(self.forward(q.tolist()))
+            pos_err = np.linalg.norm(target_pos - cur[:3])
+            ori_err = np.linalg.norm(target_ori - cur[3:])
+
+            if pos_err < pos_tol and ori_err < ori_tol:
+                self._q_prev = q.copy()
+                self._prev_converged = True
+                return q.tolist(), True
+
+            Jp = self._position_jacobian(q)
+
+            # Maintain position: correct any drift
+            pos_error = target_pos - cur[:3]
+            Jp_pinv = Jp.T @ np.linalg.inv(Jp @ Jp.T + 0.01**2 * np.eye(3))
+            delta_q_pos = Jp_pinv @ pos_error
+
+            # Null-space projector: I - J+ @ J
+            N = np.eye(6) - Jp_pinv @ Jp
+
+            # Orientation gradient in null space
+            Jo = self._orientation_jacobian(q)
+            ori_error = target_ori - cur[3:]
+            # Desired joint step for orientation (unconstrained)
+            delta_q_ori_desired = Jo.T @ np.linalg.solve(Jo @ Jo.T + 0.1**2 * np.eye(3), ori_error)
+            # Project into null space
+            delta_q_null = N @ delta_q_ori_desired
+
+            delta_q = delta_q_pos + delta_q_null
+
+            # Limit step size
+            step = np.linalg.norm(delta_q)
+            if step > 0.2:
+                delta_q = delta_q * (0.2 / step)
+
+            q = q + delta_q
+            self._clamp_joints(q)
+
+        # Final check
+        final = np.array(self.forward(q.tolist()))
+        pos_err = np.linalg.norm(final[:3] - target_pos)
+        ori_err = np.linalg.norm(final[3:] - target_ori)
+        converged = pos_err < pos_tol and ori_err < ori_tol
+
+        self._q_prev = q.copy()
+        self._prev_converged = pos_err < pos_tol
+        return q.tolist(), converged
+
+    def solve_position_only(self, target_xyz, max_iter=50, pos_tol=2.0):
+        """
+        Solve IK for position only (ignores orientation).
+
+        Uses the 3×6 position Jacobian. More robust when orientation
+        doesn't matter.
         """
         target_pos = np.array(target_xyz, dtype=float)
         q = self._get_initial_guess(target_xyz)
@@ -77,9 +154,6 @@ class PiperIK:
         self._prev_converged = False
         return q.tolist(), False
 
-    # Alias for backward compat
-    solve_position_only = solve
-
     def _get_initial_guess(self, target_xyz):
         """Use previous converged solution if nearby, else start from a neutral pose."""
         if self._prev_converged and self._q_prev is not None:
@@ -91,13 +165,35 @@ class PiperIK:
         return np.array([0.0, 0.8, -0.8, 0.0, 0.0, 0.0])
 
     def _position_jacobian(self, q, delta=0.001):
-        """Numerical position Jacobian (3×6) via forward differences."""
+        """Numerical position Jacobian (3×6)."""
         J = np.zeros((3, 6))
         f0 = np.array(self.forward(q.tolist())[:3])
         for i in range(6):
             q_p = q.copy()
             q_p[i] += delta
             f1 = np.array(self.forward(q_p.tolist())[:3])
+            J[:, i] = (f1 - f0) / delta
+        return J
+
+    def _orientation_jacobian(self, q, delta=0.001):
+        """Numerical orientation Jacobian (3×6)."""
+        J = np.zeros((3, 6))
+        f0 = np.array(self.forward(q.tolist())[3:])
+        for i in range(6):
+            q_p = q.copy()
+            q_p[i] += delta
+            f1 = np.array(self.forward(q_p.tolist())[3:])
+            J[:, i] = (f1 - f0) / delta
+        return J
+
+    def _full_jacobian(self, q, delta=0.001):
+        """Numerical full Jacobian (6×6) for position + orientation."""
+        J = np.zeros((6, 6))
+        f0 = np.array(self.forward(q.tolist()))
+        for i in range(6):
+            q_p = q.copy()
+            q_p[i] += delta
+            f1 = np.array(self.forward(q_p.tolist()))
             J[:, i] = (f1 - f0) / delta
         return J
 
@@ -110,60 +206,30 @@ class PiperIK:
 if __name__ == "__main__":
     ik = PiperIK()
 
-    print("Testing FK at home position [0,0,0,0,0,0]:")
+    print("Testing FK at home [0,0,0,0,0,0]:")
     home = ik.forward([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
-    print(f"  End effector: x={home[0]:.1f} y={home[1]:.1f} z={home[2]:.1f} mm")
-    print(f"  Orientation:  rx={home[3]:.1f} ry={home[4]:.1f} rz={home[5]:.1f} deg")
+    print(f"  pos=({home[0]:.1f}, {home[1]:.1f}, {home[2]:.1f})  ori=({home[3]:.1f}, {home[4]:.1f}, {home[5]:.1f})")
 
-    print("\nTesting IK for SDK init position (56.1, 0, 213.3):")
-    joints, ok = ik.solve([56.1, 0.0, 213.3])
-    print(f"  Converged: {ok}")
-    print(f"  Joints (deg): {[f'{math.degrees(j):.1f}' for j in joints]}")
-    verify = ik.forward(joints)
-    print(f"  Verify FK:    x={verify[0]:.1f} y={verify[1]:.1f} z={verify[2]:.1f}")
-
-    print("\nTesting problem points (non-zero Y):")
-    test_points = [
-        (141.4, -34.0, 196.1),
-        (142.5, -34.0, 194.9),
-        (143.5, -33.9, 193.9),
-        (144.5, -33.8, 192.9),
-        (145.5, -33.7, 192.0),
+    print("\nTesting full 6-DOF solve (position + orientation):")
+    test_cases = [
+        ([141.4, -34.0, 196.1], [0.0, 85.0, 0.0]),
+        ([200.0, 50.0, 300.0], [0.0, 85.0, 0.0]),
+        ([250.0, -80.0, 200.0], [0.0, 45.0, 0.0]),
+        ([300.0, 0.0, 250.0], [10.0, 70.0, -10.0]),
+        ([150.0, 0.0, 350.0], [0.0, 90.0, 0.0]),
     ]
-    for x, y, z in test_points:
-        joints, ok = ik.solve([x, y, z])
-        verify = ik.forward(joints)
-        err = math.sqrt((verify[0]-x)**2 + (verify[1]-y)**2 + (verify[2]-z)**2)
-        status = "OK" if ok else f"FAIL err={err:.1f}mm"
-        print(f"  ({x:.1f}, {y:.1f}, {z:.1f}) → [{status}]")
+    for xyz, rpy in test_cases:
+        joints, ok = ik.solve(xyz, rpy)
+        v = ik.forward(joints)
+        pos_err = math.sqrt(sum((v[i]-xyz[i])**2 for i in range(3)))
+        ori_err = math.sqrt(sum((v[i+3]-rpy[i])**2 for i in range(3)))
+        status = "OK" if ok else f"pos_err={pos_err:.1f}mm ori_err={ori_err:.1f}°"
+        print(f"  xyz={xyz} rpy={rpy} → [{status}]")
 
-    print("\nTesting diverse positions (fresh solver, no warm-start):")
+    print("\nTesting position-only solve:")
     ik2 = PiperIK()
-    diverse_points = [
-        (200.0, 50.0, 300.0),
-        (250.0, -80.0, 200.0),
-        (100.0, 100.0, 350.0),
-        (300.0, 0.0, 250.0),
-        (50.0, -50.0, 400.0),
-        (180.0, 60.0, 150.0),
-        (350.0, 0.0, 250.0),
-        (56.1, 0.0, 213.3),
-    ]
-    for x, y, z in diverse_points:
-        joints, ok = ik2.solve([x, y, z])
-        verify = ik2.forward(joints)
-        err = math.sqrt((verify[0]-x)**2 + (verify[1]-y)**2 + (verify[2]-z)**2)
-        status = "OK" if ok else f"FAIL err={err:.1f}mm"
-        print(f"  ({x:.1f}, {y:.1f}, {z:.1f}) → [{status}]")
-
-    print("\nBenchmark:")
-    import time
-    ik3 = PiperIK()
-    start = time.time()
-    count = 0
-    for x in range(100, 350, 5):
-        for y in range(-80, 80, 40):
-            ik3.solve([float(x), float(y), 250.0])
-            count += 1
-    elapsed = time.time() - start
-    print(f"  {count} solves in {elapsed*1000:.0f}ms ({elapsed/count*1000:.2f}ms each, {1/(elapsed/count):.0f} Hz)")
+    for x, y, z in [(141.4, -34.0, 196.1), (250.0, -80.0, 200.0), (350.0, 0.0, 250.0)]:
+        joints, ok = ik2.solve_position_only([x, y, z])
+        v = ik2.forward(joints)
+        err = math.sqrt((v[0]-x)**2 + (v[1]-y)**2 + (v[2]-z)**2)
+        print(f"  ({x}, {y}, {z}) → [{'OK' if ok else f'FAIL err={err:.1f}mm'}]")

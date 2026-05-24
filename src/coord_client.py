@@ -19,10 +19,18 @@ import time
 import sys
 
 
-def send_coord(sock, x, y, z):
-    """Send a single coordinate as newline-delimited JSON."""
-    msg = json.dumps({"x": x, "y": y, "z": z}) + "\n"
-    sock.sendall(msg.encode("utf-8"))
+def send_coord(sock, x, y, z, rx=None, ry=None, rz=None, gripper=None):
+    """Send a coordinate as newline-delimited JSON. Rotation/gripper are optional."""
+    msg = {"x": x, "y": y, "z": z}
+    if rx is not None:
+        msg["rx"] = rx
+    if ry is not None:
+        msg["ry"] = ry
+    if rz is not None:
+        msg["rz"] = rz
+    if gripper is not None:
+        msg["gripper"] = gripper
+    sock.sendall((json.dumps(msg) + "\n").encode("utf-8"))
 
 
 def return_to_home(sock, hz=30):
@@ -34,7 +42,7 @@ def return_to_home(sock, hz=30):
 
 
 def run_circle(sock, hz=30):
-    """Send coordinates tracing a circle in the XZ plane."""
+    """Send coordinates tracing a circle in the XZ plane with gripper cycling."""
     print("Sending circle pattern (Ctrl+C to stop)...")
     center_x, center_y, center_z = 250.0, 0.0, 250.0
     radius = 50.0
@@ -46,8 +54,10 @@ def run_circle(sock, hz=30):
             x = center_x + radius * math.cos(2 * math.pi * t / period)
             z = center_z + radius * math.sin(2 * math.pi * t / period)
             y = center_y
-            send_coord(sock, x, y, z)
-            print(f"  x={x:.1f} y={y:.1f} z={z:.1f}", end="\r")
+            # Cycle gripper: open at top, closed at bottom
+            gripper = 35.0 * (1 + math.sin(2 * math.pi * t / period)) / 2.0
+            send_coord(sock, x, y, z, ry=85.0, gripper=gripper)
+            print(f"  x={x:.1f} y={y:.1f} z={z:.1f} grip={gripper:.1f}mm", end="\r")
             time.sleep(1.0 / hz)
             t += 1.0 / hz
     except KeyboardInterrupt:
@@ -85,21 +95,33 @@ def run_line(sock, hz=30):
 
 def run_manual(sock):
     """Interactively type coordinates."""
-    print("Enter coordinates as 'x y z' (Ctrl+C to quit):")
+    print("Enter coordinates as 'x y z [rx ry rz] [gripper]' (Ctrl+C to quit):")
+    print("  Examples: 250 0 300")
+    print("           250 0 300 0 85 0")
+    print("           250 0 300 0 85 0 35.0")
     try:
         while True:
             raw = input("  > ")
             parts = raw.strip().split()
-            if len(parts) != 3:
-                print("    Expected: x y z (e.g., 250 0 300)")
+            if len(parts) < 3:
+                print("    Expected at least: x y z")
                 continue
             try:
                 x, y, z = float(parts[0]), float(parts[1]), float(parts[2])
+                rx = float(parts[3]) if len(parts) > 3 else None
+                ry = float(parts[4]) if len(parts) > 4 else None
+                rz = float(parts[5]) if len(parts) > 5 else None
+                gripper = float(parts[6]) if len(parts) > 6 else None
             except ValueError:
                 print("    Invalid numbers.")
                 continue
-            send_coord(sock, x, y, z)
-            print(f"    Sent: x={x:.1f} y={y:.1f} z={z:.1f}")
+            send_coord(sock, x, y, z, rx=rx, ry=ry, rz=rz, gripper=gripper)
+            print(f"    Sent: x={x:.1f} y={y:.1f} z={z:.1f}", end="")
+            if rx is not None:
+                print(f" rx={rx:.1f} ry={ry:.1f} rz={rz:.1f}", end="")
+            if gripper is not None:
+                print(f" gripper={gripper:.1f}mm", end="")
+            print()
     except (KeyboardInterrupt, EOFError):
         pass
 
