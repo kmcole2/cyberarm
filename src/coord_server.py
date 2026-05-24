@@ -89,7 +89,7 @@ class PositionLimiter:
 
 
 WORKSPACE_MIN = [-400, -400, 0]
-WORKSPACE_MAX = [400, 400, 500]
+WORKSPACE_MAX = [600, 600, 600]
 
 
 def send_joints(piper, joints_rad, speed, gripper_mm=0.0):
