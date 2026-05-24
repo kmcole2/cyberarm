@@ -92,11 +92,13 @@ WORKSPACE_MIN = [-400, -400, 0]
 WORKSPACE_MAX = [400, 400, 500]
 
 
-def send_joints(piper, joints_rad, speed):
-    """Send joint angles to the Piper arm."""
+def send_joints(piper, joints_rad, speed, gripper_mm=0.0):
+    """Send joint angles and gripper command to the Piper arm."""
     millideg = [int(math.degrees(j) * 1000) for j in joints_rad]
     piper.MotionCtrl_2(0x01, 0x01, speed, 0x00)
     piper.JointCtrl(*millideg)
+    gripper_units = int(gripper_mm * 1000)
+    piper.GripperCtrl(gripper_units, 1000, 0x01, 0)
 
 
 def get_piper_status(piper):
@@ -247,13 +249,10 @@ def run_coord_server(port, piper, speed, no_arm):
                             print(f"  Bad message: {line!r} ({e})")
                             continue
 
-                        # Rotation and gripper disabled for now — position only
-                        # rx = float(msg.get("rx", 0.0))
-                        # ry = float(msg.get("ry", 85.0))
-                        # rz = float(msg.get("rz", 0.0))
-                        # gripper_mm = float(msg.get("gripper", 0.0))
+                        gripper_mm = float(msg.get("gripper", 0.0))
 
-                        print("  recv: x={:.1f} y={:.1f} z={:.1f}".format(x, y, z))
+                        print("  recv: x={:.1f} y={:.1f} z={:.1f} grip={:.1f}".format(
+                            x, y, z, gripper_mm))
 
                         x, y, z = limiter.limit(x, y, z)
 
@@ -271,10 +270,12 @@ def run_coord_server(port, piper, speed, no_arm):
 
                         if no_arm:
                             degs = ["{:.0f}".format(math.degrees(j)) for j in joints]
-                            print("  xyz=({:.1f},{:.1f},{:.1f}) → joints={}".format(x, y, z, degs), end="\r")
+                            print("  xyz=({:.1f},{:.1f},{:.1f}) grip={:.1f} -> joints={}".format(
+                                x, y, z, gripper_mm, degs), end="\r")
                         else:
-                            send_joints(piper, joints, speed)
-                            print("  xyz=({:.1f},{:.1f},{:.1f}) → sent".format(x, y, z), end="\r")
+                            send_joints(piper, joints, speed, gripper_mm)
+                            print("  xyz=({:.1f},{:.1f},{:.1f}) grip={:.1f} -> sent".format(
+                                x, y, z, gripper_mm), end="\r")
 
             except ConnectionResetError:
                 pass
