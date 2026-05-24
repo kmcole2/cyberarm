@@ -13,7 +13,8 @@ import sys
 
 
 def _run(cmd, check=True):
-    return subprocess.run(cmd, shell=True, capture_output=True, text=True, check=check)
+    return subprocess.run(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                          universal_newlines=True, check=check)
 
 
 def _check_dependency(name):
