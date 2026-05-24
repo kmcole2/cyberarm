@@ -11,7 +11,6 @@ from piper_sdk import C_PiperInterface_V2
 
 piper = C_PiperInterface_V2("can0")
 piper.ConnectPort()
-time.sleep(0.025)
 
 print("Firmware:", piper.GetPiperFirmwareVersion())
 
@@ -20,11 +19,16 @@ while not piper.EnablePiper():
     time.sleep(0.01)
 print("Enabled!")
 
-# Initialize gripper: clear errors then enable
+# Initialize gripper: clear errors then enable (no sleeps — matches official demo)
 piper.GripperCtrl(0, 1000, 0x02, 0)
-time.sleep(0.1)
 piper.GripperCtrl(0, 1000, 0x01, 0)
-time.sleep(0.1)
+
+# Warm up: send gripper commands in a tight loop to ensure firmware accepts them
+print("Warming up gripper...")
+for _ in range(200):
+    piper.MotionCtrl_2(0x01, 0x01, 50, 0x00)
+    piper.GripperCtrl(0, 1000, 0x01, 0)
+    time.sleep(0.005)
 print("Gripper initialized.\n")
 
 EFFORT = 1000  # 1 N/m
@@ -34,6 +38,7 @@ def set_gripper(opening_mm, duration=2.0):
     units = int(opening_mm * 1000)  # mm → 0.001mm
     steps = int(duration / 0.005)
     for _ in range(steps):
+        piper.MotionCtrl_2(0x01, 0x01, 50, 0x00)
         piper.GripperCtrl(units, EFFORT, 0x01, 0)
         gp = piper.GetArmGripperMsgs().gripper_state
         actual = gp.grippers_angle / 1000.0
