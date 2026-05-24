@@ -24,6 +24,14 @@ def send_coord(sock, x, y, z):
     sock.sendall(msg.encode("utf-8"))
 
 
+def return_to_home(sock, hz=30):
+    """Smoothly send the arm back to 0, 0, 0."""
+    print("\nReturning to home (0, 0, 0)...")
+    send_coord(sock, 0.0, 0.0, 0.0)
+    time.sleep(1.0 / hz)
+    print("Home reached.")
+
+
 def run_circle(sock, hz=30):
     """Send coordinates tracing a circle in the XZ plane."""
     print("Sending circle pattern (Ctrl+C to stop)...")
@@ -42,7 +50,9 @@ def run_circle(sock, hz=30):
             time.sleep(1.0 / hz)
             t += 1.0 / hz
     except KeyboardInterrupt:
-        print("\nStopped.")
+        pass
+
+    return_to_home(sock, hz)
 
 
 def run_line(sock, hz=30):
@@ -67,7 +77,9 @@ def run_line(sock, hz=30):
             print(f"  x={x:.1f} y={y:.1f} z={z:.1f}", end="\r")
             time.sleep(1.0 / hz)
     except KeyboardInterrupt:
-        print("\nStopped.")
+        pass
+
+    return_to_home(sock, hz)
 
 
 def run_manual(sock):
@@ -88,7 +100,9 @@ def run_manual(sock):
             send_coord(sock, x, y, z)
             print(f"    Sent: x={x:.1f} y={y:.1f} z={z:.1f}")
     except (KeyboardInterrupt, EOFError):
-        print("\nDone.")
+        pass
+
+    return_to_home(sock)
 
 
 def main():

@@ -145,7 +145,12 @@ def run_server(port, piper, speed, no_arm):
             except ConnectionResetError:
                 pass
 
-            print(f"\nClient {addr} disconnected. Holding position.")
+            print(f"\nClient {addr} disconnected. Returning to home...")
+            if not no_arm:
+                send_position(piper, 0, 0, 0, speed)
+            else:
+                print("  Home: x=0.0 y=0.0 z=0.0 mm")
+            limiter.prev = None
             conn.close()
 
     except KeyboardInterrupt:
