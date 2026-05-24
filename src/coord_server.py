@@ -2,15 +2,15 @@
 """
 Coordinate Server — Receives XYZ positions via TCP and moves the Piper arm.
 
-A simulator (or any client) connects via TCP and streams newline-delimited JSON
-with x, y, z coordinates in millimeters. The server uses the Piper SDK's built-in
-inverse kinematics (EndPoseCtrl) to move the end effector to that position.
+Uses our own IK solver (piper_ik.py) to convert Cartesian coordinates to
+joint angles, then sends them via JointCtrl. This bypasses the firmware's
+EndPoseCtrl which has silent failure modes.
 
 Protocol:
   - Connect to TCP port 5555 (configurable)
   - Send one JSON object per line: {"x": 250.0, "y": 0.0, "z": 300.0}
   - Coordinates are in millimeters
-  - Gripper stays closed, orientation is fixed (pointing down)
+  - Gripper stays closed, orientation is fixed (pointing forward)
 
 Usage:
   python3 coord_server.py                # Full mode (arm connected)
@@ -20,9 +20,14 @@ Usage:
 
 import argparse
 import json
+import math
+import os
 import socket
-import time
 import sys
+import time
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from piper_ik import PiperIK
 
 
 def init_arm(can_channel):
@@ -70,38 +75,29 @@ class PositionLimiter:
         return limited
 
 
-# Approximate workspace bounds for the Piper arm (mm)
 WORKSPACE_MIN = [-400, -400, 0]
 WORKSPACE_MAX = [400, 400, 500]
 
 
-def send_position(piper, x_mm, y_mm, z_mm, speed):
-    """Send Cartesian position to the Piper arm via EndPoseCtrl."""
-    # Clamp to workspace bounds
-    x_mm = clamp(x_mm, WORKSPACE_MIN[0], WORKSPACE_MAX[0])
-    y_mm = clamp(y_mm, WORKSPACE_MIN[1], WORKSPACE_MAX[1])
-    z_mm = clamp(z_mm, WORKSPACE_MIN[2], WORKSPACE_MAX[2])
-
-    # Convert mm to 0.001mm (SDK units)
-    x_u = int(x_mm * 1000)
-    y_u = int(y_mm * 1000)
-    z_u = int(z_mm * 1000)
-
-    # Fixed orientation (gripper pointing down): RX=0, RY=0, RZ=0
-    piper.MotionCtrl_2(0x01, 0x00, speed, 0x00)
-    piper.EndPoseCtrl(x_u, y_u, z_u, 0, 85_000, 0)
+def send_joints(piper, joints_rad, speed):
+    """Send joint angles to the Piper arm via JointCtrl."""
+    millideg = [int(math.degrees(j) * 1000) for j in joints_rad]
+    piper.MotionCtrl_2(0x01, 0x01, speed, 0x00)
+    piper.JointCtrl(*millideg)
     piper.GripperCtrl(0, 1000, 0x01, 0)
 
 
 def run_server(port, piper, speed, no_arm):
     """Run the TCP server, accepting one client at a time."""
     limiter = PositionLimiter(max_step_mm=5.0)
+    ik = PiperIK()
 
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     server.bind(("0.0.0.0", port))
     server.listen(1)
     print(f"\nListening on port {port} (Ctrl+C to quit)...")
+    print("Using custom IK → JointCtrl (bypassing EndPoseCtrl)")
 
     try:
         while True:
@@ -110,6 +106,7 @@ def run_server(port, piper, speed, no_arm):
             print(f"Client connected: {addr}")
 
             buffer = ""
+            ik_failures = 0
             try:
                 while True:
                     data = conn.recv(4096)
@@ -133,23 +130,33 @@ def run_server(port, piper, speed, no_arm):
                             print(f"  Bad message: {line!r} ({e})")
                             continue
 
-                        # Apply velocity limiting
                         x, y, z = limiter.limit(x, y, z)
 
+                        x = clamp(x, WORKSPACE_MIN[0], WORKSPACE_MAX[0])
+                        y = clamp(y, WORKSPACE_MIN[1], WORKSPACE_MAX[1])
+                        z = clamp(z, WORKSPACE_MIN[2], WORKSPACE_MAX[2])
+
+                        joints, converged = ik.solve_position_only([x, y, z])
+
+                        if not converged:
+                            ik_failures += 1
+                            if ik_failures <= 5:
+                                print(f"  IK did not converge for ({x:.1f}, {y:.1f}, {z:.1f})")
+                            continue
+
                         if no_arm:
-                            print(f"  Position: x={x:.1f} y={y:.1f} z={z:.1f} mm", end="\r")
+                            degs = [f"{math.degrees(j):.0f}" for j in joints]
+                            print(f"  xyz=({x:.1f},{y:.1f},{z:.1f}) → joints={degs}", end="\r")
                         else:
-                            send_position(piper, x, y, z, speed)
-                            print(f"  Sent: x={x:.1f} y={y:.1f} z={z:.1f} mm", end="\r")
+                            send_joints(piper, joints, speed)
+                            print(f"  xyz=({x:.1f},{y:.1f},{z:.1f}) → sent", end="\r")
 
             except ConnectionResetError:
                 pass
 
-            print(f"\nClient {addr} disconnected. Returning to home...")
+            print(f"\nClient {addr} disconnected (IK failures: {ik_failures}). Returning home...")
             if not no_arm:
-                send_position(piper, 0, 0, 0, speed)
-            else:
-                print("  Home: x=0.0 y=0.0 z=0.0 mm")
+                send_joints(piper, [0.0, 0.0, 0.0, 0.0, 0.0, 0.0], speed)
             limiter.prev = None
             conn.close()
 
@@ -160,7 +167,7 @@ def run_server(port, piper, speed, no_arm):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="TCP Coordinate Server → Piper Arm")
+    parser = argparse.ArgumentParser(description="TCP Coordinate Server → Piper Arm (Custom IK)")
     parser.add_argument("--port", type=int, default=5555, help="TCP port (default: 5555)")
     parser.add_argument("--can", default="can0", help="CAN channel (default: can0)")
     parser.add_argument("--speed", type=int, default=50, help="Arm speed %% (default: 50)")
@@ -175,6 +182,11 @@ def main():
         run_server(args.port, piper, args.speed, args.no_arm)
     finally:
         if piper:
+            print("Returning to home...")
+            for _ in range(300):
+                piper.MotionCtrl_2(0x01, 0x01, args.speed, 0x00)
+                piper.JointCtrl(0, 0, 0, 0, 0, 0)
+                time.sleep(0.005)
             print("Disabling arm...")
             piper.DisablePiper()
             print("Done.")
